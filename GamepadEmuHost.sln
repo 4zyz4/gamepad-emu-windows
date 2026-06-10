@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.14.37328.6 d17.14
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "GamepadEmuHost", "GamepadEmuHost.csproj", "{B8A4C68A-1704-0FEF-0A2F-7596F180B79A}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{B8A4C68A-1704-0FEF-0A2F-7596F180B79A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B8A4C68A-1704-0FEF-0A2F-7596F180B79A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B8A4C68A-1704-0FEF-0A2F-7596F180B79A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B8A4C68A-1704-0FEF-0A2F-7596F180B79A}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {62766463-83F9-4791-96A4-97046BA50819}
+	EndGlobalSection
+EndGlobal

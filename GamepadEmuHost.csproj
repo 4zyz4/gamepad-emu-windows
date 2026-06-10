@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+	  <ApplicationIcon>icon.ico</ApplicationIcon>
+    <StartupObject>GamepadEmuHost.App</StartupObject>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>false</SelfContained>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Google.Protobuf" Version="3.28.3" />
+    <PackageReference Include="Grpc.Tools" Version="2.67.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+
+    <PackageReference Include="Nefarius.ViGEm.Client" Version="1.21.126" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Protobuf Include="..\gamepad_emu_android\proto\gamepad_state.proto" Link="Protocol\gamepad_state.proto">
+      <ProtoRoot>..\gamepad_emu_android\proto</ProtoRoot>
+    </Protobuf>
+  </ItemGroup>
+
+</Project>
