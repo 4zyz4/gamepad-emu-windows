@@ -127,7 +127,7 @@ public class MainViewModel : INotifyPropertyChanged
         }
 
         OnPropertyChanged(nameof(HasActiveSession));
-        StatusText = "就绪";
+        StatusText = "正在扫描...";
     }
 
     public async Task ConnectByIpAsync()
