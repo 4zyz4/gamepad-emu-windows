@@ -202,6 +202,9 @@ public class MainViewModel : INotifyPropertyChanged
         {
             Sessions.Add(session);
             OnPropertyChanged(nameof(HasActiveSession));
+            var card = DeviceCards.FirstOrDefault(c => c.IpAddress == session.Device.IpString);
+            if (card != null)
+                card.Mode = session.Mode;
         });
     }
 
@@ -217,7 +220,7 @@ public class MainViewModel : INotifyPropertyChanged
             if (card != null)
             {
                 card.IsConnected = false;
-                card.Mode = ControllerMode.Xbox360;
+                card.Mode = ControllerMode.Ds4;
             }
             StatusText = $"已断开: {ip}";
         });

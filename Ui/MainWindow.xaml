@@ -19,6 +19,15 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <Style x:Key="ModeButton" TargetType="Button">
+            <Setter Property="Background" Value="Transparent" />
+            <Style.Triggers>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Foreground" Value="Blue" />
+                </Trigger>
+            </Style.Triggers>
+        </Style>
     </Window.Resources>
 
     <Grid Margin="16">
@@ -75,10 +84,14 @@
                                 <!-- Session controls -->
                                 <StackPanel Grid.Column="1" Orientation="Horizontal"
                                             Visibility="{Binding ShowControls, Converter={x:Static ui:BoolToVisibilityConverter.Instance}}">
-                                    <ComboBox Width="95" Height="28"
-                                              ItemsSource="{Binding ControllerModes}"
-                                              SelectedItem="{Binding Mode}"
-                                              SelectionChanged="OnCardModeChanged" />
+                                    <Button Content="Xbox" Width="50" Height="28" FontSize="12"
+                                            Style="{StaticResource ModeButton}"
+                                            IsEnabled="{Binding IsDs4Active}"
+                                            Tag="Xbox" Click="OnCardModeClick" />
+                                    <Button Content="DS4" Width="40" Height="28" Margin="4,0,0,0" FontSize="12"
+                                            Style="{StaticResource ModeButton}"
+                                            IsEnabled="{Binding IsXbox360Active}"
+                                            Tag="DS4" Click="OnCardModeClick" />
                                     <Button Content="断开" Width="50" Height="28" Margin="6,0,0,0"
                                             Click="OnCardDisconnectClick" />
                                 </StackPanel>

@@ -40,12 +40,13 @@ public partial class MainWindow : Window
         _vm.Refresh();
     }
 
-    private async void OnCardModeChanged(object sender, SelectionChangedEventArgs e)
+    private async void OnCardModeClick(object sender, RoutedEventArgs e)
     {
-        if (e.AddedItems.Count == 0) return;
         var card = (sender as FrameworkElement)?.DataContext as DeviceCardViewModel;
-        if (card != null && e.AddedItems[0] is ControllerMode mode)
-            await _vm.SetModeAsync(card, mode);
+        if (card == null) return;
+        var mode = (sender as FrameworkElement)?.Tag as string == "DS4"
+            ? ControllerMode.Ds4 : ControllerMode.Xbox360;
+        await _vm.SetModeAsync(card, mode);
     }
 
     protected override void OnClosed(EventArgs e)

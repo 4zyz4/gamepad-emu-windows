@@ -19,6 +19,7 @@ public class GamepadSession : IDisposable
     private bool _readyFired;
     private float _gyroBiasX, _gyroBiasY, _gyroBiasZ;
 
+
     public DiscoveredDevice Device { get; }
     public ControllerMode Mode { get; private set; }
     public object? Controller { get; private set; }
@@ -175,6 +176,12 @@ public class GamepadSession : IDisposable
             {
                 var ctrl = _viGEm.CreateXbox360Controller();
                 ctrl.Connect();
+                ctrl.SetAxisValue(Xbox360Axis.LeftThumbX, 0);
+                ctrl.SetAxisValue(Xbox360Axis.LeftThumbY, 0);
+                ctrl.SetAxisValue(Xbox360Axis.RightThumbX, 0);
+                ctrl.SetAxisValue(Xbox360Axis.RightThumbY, 0);
+                ctrl.SetSliderValue(Xbox360Slider.LeftTrigger, 0);
+                ctrl.SetSliderValue(Xbox360Slider.RightTrigger, 0);
                 Controller = ctrl;
                 break;
             }
@@ -385,8 +392,8 @@ public class GamepadSession : IDisposable
 
         Mode = mode;
         DestroyController();
+        await Task.Delay(100);
         CreateController(mode);
-
         try
         {
             await SendAsync(new ServerToClient

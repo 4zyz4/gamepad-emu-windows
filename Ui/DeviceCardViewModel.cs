@@ -9,7 +9,7 @@ public class DeviceCardViewModel : INotifyPropertyChanged
 {
     private readonly DiscoveredDevice _device;
     private bool _isConnected;
-    private ControllerMode _mode = ControllerMode.Xbox360;
+    private ControllerMode _mode = ControllerMode.Ds4;
 
     public string IpAddress => _device.IpString;
     public string DeviceName => _device.DeviceName;
@@ -38,10 +38,13 @@ public class DeviceCardViewModel : INotifyPropertyChanged
             if (_mode == value) return;
             _mode = value;
             OnPropertyChanged();
+            OnPropertyChanged(nameof(IsXbox360Active));
+            OnPropertyChanged(nameof(IsDs4Active));
         }
     }
 
-    public List<ControllerMode> ControllerModes { get; } = [ControllerMode.Xbox360, ControllerMode.Ds4];
+    public bool IsXbox360Active => _mode == ControllerMode.Xbox360;
+    public bool IsDs4Active => _mode == ControllerMode.Ds4;
 
     internal DiscoveredDevice Device => _device;
 

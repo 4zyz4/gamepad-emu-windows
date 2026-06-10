@@ -36,41 +36,57 @@ public class NetworkService : IDisposable
 
     public void StopDiscovery()
     {
-        _discoveryCts?.Cancel();
-        _discoveryCts = null;
+        if (_discoveryCts != null)
+        {
+            _discoveryCts.Cancel();
+            _discoveryCts.Dispose();
+            _discoveryCts = null;
+        }
+        try
+        {
+            _discoveryTask?.GetAwaiter().GetResult();
+        }
+        catch { }
+        _discoveryTask = null;
     }
 
     private async Task DiscoveryLoop(CancellationToken ct)
     {
-        using var udp = new UdpClient(DefaultPort);
-        udp.EnableBroadcast = true;
-
-        try
+        while (!ct.IsCancellationRequested)
         {
-            while (!ct.IsCancellationRequested)
+            try
             {
-                var result = await udp.ReceiveAsync(ct);
-                var msg = System.Text.Encoding.UTF8.GetString(result.Buffer);
+                using var udp = new UdpClient(DefaultPort);
+                udp.EnableBroadcast = true;
 
-                if (msg.StartsWith(BroadcastPrefix))
+                while (!ct.IsCancellationRequested)
                 {
-                    var deviceName = msg[BroadcastPrefix.Length..];
-                    var key = $"{result.RemoteEndPoint.Address}:{DefaultPort}";
+                    var result = await udp.ReceiveAsync(ct);
+                    var msg = System.Text.Encoding.UTF8.GetString(result.Buffer);
 
-                    var device = _discovered.GetOrAdd(key, _ => new DiscoveredDevice
+                    if (msg.StartsWith(BroadcastPrefix))
                     {
-                        DeviceName = deviceName,
-                        IpAddress = result.RemoteEndPoint.Address,
-                        Port = DefaultPort
-                    });
-                    device.LastSeen = DateTime.UtcNow;
+                        var deviceName = msg[BroadcastPrefix.Length..];
+                        var key = $"{result.RemoteEndPoint.Address}:{DefaultPort}";
 
-                    OnDeviceDiscovered?.Invoke(device);
+                        var device = _discovered.GetOrAdd(key, _ => new DiscoveredDevice
+                        {
+                            DeviceName = deviceName,
+                            IpAddress = result.RemoteEndPoint.Address,
+                            Port = DefaultPort
+                        });
+                        device.LastSeen = DateTime.UtcNow;
+
+                        OnDeviceDiscovered?.Invoke(device);
+                    }
                 }
             }
+            catch (OperationCanceledException) { break; }
+            catch
+            {
+                await Task.Delay(1000, ct);
+            }
         }
-        catch (OperationCanceledException) { }
-        catch (ObjectDisposedException) { }
     }
 
     public async Task<GamepadSession?> ConnectAsync(DiscoveredDevice device)
