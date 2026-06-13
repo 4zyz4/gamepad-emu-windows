@@ -319,10 +319,10 @@ public class GamepadSession : IDisposable
         WriteInt16LE(buf, 14, (short)Math.Clamp(gy * 940f, short.MinValue, short.MaxValue));
         WriteInt16LE(buf, 16, (short)Math.Clamp(gz * 940f, short.MinValue, short.MaxValue));
 
-        // [18-23]: Accelerometer (m/s² → int16, scale ≈1670 for ±2g)
-        WriteInt16LE(buf, 18, (short)Math.Clamp(input.AccelX * 1670f, short.MinValue, short.MaxValue));
-        WriteInt16LE(buf, 20, (short)Math.Clamp(input.AccelY * 1670f, short.MinValue, short.MaxValue));
-        WriteInt16LE(buf, 22, (short)Math.Clamp(input.AccelZ * 1670f, short.MinValue, short.MaxValue));
+        // [18-23]: Accelerometer (m/s² → int16, scale ≈835 for ±2g)
+        WriteInt16LE(buf, 18, (short)Math.Clamp(input.AccelX * 835f, short.MinValue, short.MaxValue));
+        WriteInt16LE(buf, 20, (short)Math.Clamp(input.AccelY * 835f, short.MinValue, short.MaxValue));
+        WriteInt16LE(buf, 22, (short)Math.Clamp(input.AccelZ * 835f, short.MinValue, short.MaxValue));
 
         // [24-28]: reserved (default 0xE9,0,0,0,0 from ViGEm)
         buf[24] = 0xE9;
