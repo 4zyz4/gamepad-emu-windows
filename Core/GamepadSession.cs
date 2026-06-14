@@ -199,7 +199,11 @@ public class GamepadSession : IDisposable
     {
         _ = SendAsync(new ServerToClient
         {
-            Vibration = new Vibration { MotorSpeed = e.LargeMotor }
+            Vibration = new Vibration
+            {
+                LargeMotor = e.LargeMotor,
+                SmallMotor = e.SmallMotor
+            }
         });
     }
 

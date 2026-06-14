@@ -24,7 +24,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Protobuf Include="..\gamepad_emu_android\proto\gamepad_state.proto" Link="Protocol\gamepad_state.proto">
+    <Protobuf Include="..\gamepad_emu_android\proto\gamepad_state.proto">
       <ProtoRoot>..\gamepad_emu_android\proto</ProtoRoot>
     </Protobuf>
   </ItemGroup>
