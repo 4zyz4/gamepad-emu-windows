@@ -16,6 +16,7 @@ public class GamepadSession : IDisposable
     private readonly CancellationTokenSource _cts = new();
     private Task _readTask = Task.CompletedTask;
     private Task _vibTask = Task.CompletedTask;
+    private Task _keepaliveTask = Task.CompletedTask;
     private bool _disposed;
     private bool _readyFired;
     private float _gyroBiasX, _gyroBiasY, _gyroBiasZ;
@@ -35,6 +36,12 @@ public class GamepadSession : IDisposable
 
     public event Action<GamepadSession>? OnReady;
     public event Action<GamepadSession>? OnDisconnected;
+    public event Action<GamepadSession>? OnConnectionLost;
+
+    public bool IsReconnectRequested { get; private set; }
+
+    public string ReconnectIp => Device.IpAddress.ToString();
+    public int ReconnectPort => Device.Port;
 
     public GamepadSession(DiscoveredDevice device, TcpClient tcp, ViGEmClient viGEm)
     {
@@ -48,6 +55,7 @@ public class GamepadSession : IDisposable
     {
         _readTask = Task.Run(() => ReadLoop(_cts.Token));
         _vibTask = Task.Run(() => VibrationSendLoop(_cts.Token));
+        _keepaliveTask = Task.Run(() => KeepaliveLoop(_cts.Token));
     }
 
     public async Task SendAsync(IMessage message)
@@ -70,6 +78,7 @@ public class GamepadSession : IDisposable
         }
         catch
         {
+            if (IsReconnectRequested) return;
             Disconnect();
         }
     }
@@ -78,32 +87,45 @@ public class GamepadSession : IDisposable
     {
         var lengthBuf = new byte[4];
         var buffer = new byte[65536];
+        bool connectionAbnormal = false;
 
         try
         {
             while (!ct.IsCancellationRequested)
             {
                 var headerRead = await ReadExactAsync(_stream, lengthBuf, 4, ct);
-                if (headerRead < 4) break;
+                if (headerRead < 4) { connectionAbnormal = true; break; }
 
                 var msgLen = (lengthBuf[0] << 24) | (lengthBuf[1] << 16) |
                              (lengthBuf[2] << 8) | lengthBuf[3];
-                if (msgLen < 0 || msgLen > buffer.Length) break;
+                if (msgLen < 0 || msgLen > buffer.Length) { connectionAbnormal = true; break; }
 
                 var bodyRead = await ReadExactAsync(_stream, buffer, msgLen, ct);
-                if (bodyRead < msgLen) break;
+                if (bodyRead < msgLen) { connectionAbnormal = true; break; }
 
                 ProcessMessage(buffer.AsSpan(0, msgLen));
             }
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException)
+        {
+            if (_disposed && IsReconnectRequested)
+            {
+                return;
+            }
+            connectionAbnormal = true;
+        }
         catch
         {
-            // connection lost
+            connectionAbnormal = true;
         }
-        finally
+
+        if (connectionAbnormal)
         {
-            Disconnect();
+            if (IsReconnectRequested)
+            {
+                return;
+            }
+            RequestReconnect();
         }
     }
 
@@ -467,6 +489,42 @@ public class GamepadSession : IDisposable
         }
     }
 
+    private async Task KeepaliveLoop(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            await Task.Delay(10000, ct);
+            try
+            {
+                await SendKeepaliveAsync();
+            }
+            catch { }
+        }
+    }
+
+    private async Task SendKeepaliveAsync()
+    {
+        if (_disposed) return;
+        try
+        {
+            var data = ClientToServer.Parser.ParseFrom(Array.Empty<byte>());
+            var wrapper = new ClientToServer { KeepAlive = new KeepAlive { Timestamp = (ulong)DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() } };
+            var buf = wrapper.ToByteArray();
+            var len = buf.Length;
+            var header = new byte[4]
+            {
+                (byte)((len >> 24) & 0xFF),
+                (byte)((len >> 16) & 0xFF),
+                (byte)((len >> 8) & 0xFF),
+                (byte)(len & 0xFF),
+            };
+            await _stream.WriteAsync(header, _cts.Token);
+            await _stream.WriteAsync(buf, _cts.Token);
+            await _stream.FlushAsync(_cts.Token);
+        }
+        catch { }
+    }
+
     public async Task SetControllerModeAsync(ControllerMode mode)
     {
         if (_disposed) return;
@@ -490,11 +548,28 @@ public class GamepadSession : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        IsReconnectRequested = false;
         _cts.Cancel();
         DestroyController();
         _stream.Close();
         _tcp.Close();
         OnDisconnected?.Invoke(this);
+    }
+
+    public void RequestReconnect()
+    {
+        IsReconnectRequested = true;
+        _disposed = true;
+        _cts.Cancel();
+        DestroyController();
+        try { _stream.Close(); } catch { }
+        try { _tcp.Close(); } catch { }
+        OnConnectionLost?.Invoke(this);
+    }
+
+    public void RequestCancelReconnect()
+    {
+        IsReconnectRequested = false;
     }
 
     private void DestroyController()

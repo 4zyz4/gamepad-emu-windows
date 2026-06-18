@@ -47,6 +47,7 @@ public class MainViewModel : INotifyPropertyChanged
         _network.OnDeviceDiscovered += OnDeviceDiscovered;
         _network.OnSessionStarted += OnSessionStarted;
         _network.OnSessionEnded += OnSessionEnded;
+        _network.OnSessionConnectionLost += OnSessionConnectionLost;
     }
 
     public Task<bool> InitializeAsync()
@@ -84,6 +85,7 @@ public class MainViewModel : INotifyPropertyChanged
     public Task DisconnectAsync(DeviceCardViewModel card)
     {
         var ip = card.IpAddress;
+        _network?.CancelReconnect(ip);
         if (_sessionMap.TryGetValue(ip, out var session))
         {
             session.Disconnect();
@@ -201,10 +203,16 @@ public class MainViewModel : INotifyPropertyChanged
         UiInvoke(() =>
         {
             Sessions.Add(session);
+            _sessionMap[session.Device.IpString] = session;
             OnPropertyChanged(nameof(HasActiveSession));
-            var card = DeviceCards.FirstOrDefault(c => c.IpAddress == session.Device.IpString);
+            var ip = session.Device.IpString;
+            var card = DeviceCards.FirstOrDefault(c => c.IpAddress == ip);
             if (card != null)
+            {
+                card.IsConnected = true;
+                card.IsReconnecting = false;
                 card.Mode = session.Mode;
+            }
         });
     }
 
@@ -220,9 +228,23 @@ public class MainViewModel : INotifyPropertyChanged
             if (card != null)
             {
                 card.IsConnected = false;
+                card.IsReconnecting = false;
                 card.Mode = ControllerMode.Ds4;
             }
             StatusText = $"已断开: {ip}";
+        });
+    }
+
+    private void OnSessionConnectionLost(string ip)
+    {
+        UiInvoke(() =>
+        {
+            var card = DeviceCards.FirstOrDefault(c => c.IpAddress == ip);
+            if (card != null)
+            {
+                card.IsConnected = false;
+                card.IsReconnecting = true;
+            }
         });
     }
 

@@ -74,12 +74,18 @@
                                 <!-- Device info -->
                                 <StackPanel Grid.Column="0" VerticalAlignment="Center">
                                     <TextBlock Text="{Binding IpAddress}" FontSize="14" FontWeight="SemiBold" />
+                                    <TextBlock Text="{Binding StatusText}" FontSize="11" Foreground="#DC3545" Margin="0,2,0,0" />
                                 </StackPanel>
 
                                 <!-- Connect button -->
                                 <Button Grid.Column="1" Content="连接" Width="70" Height="30"
                                         Visibility="{Binding ShowConnect, Converter={x:Static ui:BoolToVisibilityConverter.Instance}}"
                                         Click="OnCardConnectClick" />
+
+                                <!-- Reconnecting indicator -->
+                                <Button Grid.Column="1" Content="断开" Width="50" Height="30"
+                                        Visibility="{Binding ShowReconnecting, Converter={x:Static ui:BoolToVisibilityConverter.Instance}}"
+                                        Click="OnCardDisconnectClick" />
 
                                 <!-- Session controls -->
                                 <StackPanel Grid.Column="1" Orientation="Horizontal"
