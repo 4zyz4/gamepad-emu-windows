@@ -358,9 +358,9 @@ public class GamepadSession : IDisposable
         buf[11] = (byte)Math.Clamp(input.BatteryLevel / 10u, 0u, 10u);
 
         // [12-17]: Gyroscope (rad/s → int16, scale ≈940 for ±2000°/s)
-        var gx = input.GyroX - _gyroBiasX;
-        var gy = input.GyroY - _gyroBiasY;
-        var gz = input.GyroZ - _gyroBiasZ;
+        var gx = input.GyroX;
+        var gy = input.GyroY;
+        var gz = input.GyroZ;
         WriteInt16LE(buf, 12, (short)Math.Clamp(gx * 940f, short.MinValue, short.MaxValue));
         WriteInt16LE(buf, 14, (short)Math.Clamp(gy * 940f, short.MinValue, short.MaxValue));
         WriteInt16LE(buf, 16, (short)Math.Clamp(gz * 940f, short.MinValue, short.MaxValue));
