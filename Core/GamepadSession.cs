@@ -1,4 +1,4 @@
-using System.Net.Sockets;
+﻿using System.Net.Sockets;
 using GamepadEmu.Protocol;
 using Google.Protobuf;
 using Nefarius.ViGEm.Client;
@@ -19,14 +19,12 @@ public class GamepadSession : IDisposable
     private Task _keepaliveTask = Task.CompletedTask;
     private bool _disposed;
     private bool _readyFired;
-    private float _gyroBiasX, _gyroBiasY, _gyroBiasZ;
     private byte _lastLargeMotor;
     private byte _lastSmallMotor;
     private ulong _lastSeq;
     private DateTime _lastInputTime = DateTime.MinValue;
     private int _inputCountThisSecond;
     private int _measuredInputRate;
-
 
     public DiscoveredDevice Device { get; }
     public ControllerMode Mode { get; private set; }
@@ -121,7 +119,7 @@ public class GamepadSession : IDisposable
 
         if (connectionAbnormal)
         {
-            if (IsReconnectRequested)
+            if (IsReconnectRequested || _disposed)
             {
                 return;
             }
@@ -155,9 +153,6 @@ public class GamepadSession : IDisposable
                     if (IsReady) HandleGamepadInput(wrapper.GamepadInput);
                     break;
                 case ClientToServer.PayloadOneofCase.KeepAlive:
-                    break;
-                case ClientToServer.PayloadOneofCase.GyroCalibration:
-                    HandleGyroCalibration(wrapper.GyroCalibration);
                     break;
             }
         }
@@ -230,13 +225,6 @@ public class GamepadSession : IDisposable
         }
     }
 
-    private void HandleGyroCalibration(GyroCalibration cal)
-    {
-        _gyroBiasX = cal.BiasX;
-        _gyroBiasY = cal.BiasY;
-        _gyroBiasZ = cal.BiasZ;
-    }
-
     private void OnDs4Feedback(object? sender, DualShock4FeedbackReceivedEventArgs e)
     {
         _lastLargeMotor = e.LargeMotor;
@@ -276,7 +264,6 @@ public class GamepadSession : IDisposable
                 break;
         }
     }
-
     private void HandleXbox360Input(GamepadInput input)
     {
         var ctrl = (IXbox360Controller)Controller!;
@@ -430,9 +417,7 @@ public class GamepadSession : IDisposable
 
     private static void WriteTouchData(byte[] buf, int offset, int x, int y, bool active, byte tracking)
     {
-        // Status: bit7 = 1 if inactive, bits 6-0 = tracking number
         buf[offset] = active ? (byte)(tracking & 0x7F) : (byte)(0x80 | (tracking & 0x7F));
-        // 3 bytes: 12-bit X + 12-bit Y packed
         int cx = Math.Clamp(x, 0, 1919);
         int cy = Math.Clamp(y, 0, 942);
         buf[offset + 1] = (byte)(cx & 0xFF);
@@ -543,7 +528,6 @@ public class GamepadSession : IDisposable
         catch { }
     }
 
-
     public void Disconnect()
     {
         if (_disposed) return;
@@ -558,8 +542,8 @@ public class GamepadSession : IDisposable
 
     public void RequestReconnect()
     {
-        IsReconnectRequested = true;
         _disposed = true;
+        IsReconnectRequested = true;
         _cts.Cancel();
         DestroyController();
         try { _stream.Close(); } catch { }
