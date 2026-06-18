@@ -20,12 +20,12 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
 
-    <PackageReference Include="Nefarius.ViGEm.Client" Version="1.21.126" />
+    <PackageReference Include="Nefarius.ViGEm.Client" Version="1.21.223" />
   </ItemGroup>
 
   <ItemGroup>
-    <Protobuf Include="..\gamepad_emu_android\proto\gamepad_state.proto">
-      <ProtoRoot>..\gamepad_emu_android\proto</ProtoRoot>
+    <Protobuf Include="proto\gamepad_state.proto">
+      <ProtoRoot>proto</ProtoRoot>
     </Protobuf>
   </ItemGroup>
 
