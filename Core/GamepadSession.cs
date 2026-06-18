@@ -15,9 +15,16 @@ public class GamepadSession : IDisposable
     private readonly ViGEmClient _viGEm;
     private readonly CancellationTokenSource _cts = new();
     private Task _readTask = Task.CompletedTask;
+    private Task _vibTask = Task.CompletedTask;
     private bool _disposed;
     private bool _readyFired;
     private float _gyroBiasX, _gyroBiasY, _gyroBiasZ;
+    private byte _lastLargeMotor;
+    private byte _lastSmallMotor;
+    private ulong _lastSeq;
+    private DateTime _lastInputTime = DateTime.MinValue;
+    private int _inputCountThisSecond;
+    private int _measuredInputRate;
 
 
     public DiscoveredDevice Device { get; }
@@ -40,6 +47,7 @@ public class GamepadSession : IDisposable
     public void Start()
     {
         _readTask = Task.Run(() => ReadLoop(_cts.Token));
+        _vibTask = Task.Run(() => VibrationSendLoop(_cts.Token));
     }
 
     public async Task SendAsync(IMessage message)
@@ -153,6 +161,17 @@ public class GamepadSession : IDisposable
             CreateController(newMode);
         }
 
+        _ = SendAsync(new ServerToClient
+        {
+            ServerHello = new ServerHello
+            {
+                ProtocolVersion = 1,
+                HostName = Environment.MachineName,
+                MaxDownlinkRateHz = 1000,
+                RecommendedUplinkIntervalUs = 0,
+            }
+        });
+
         if (!_readyFired)
         {
             _readyFired = true;
@@ -175,6 +194,7 @@ public class GamepadSession : IDisposable
             default:
             {
                 var ctrl = _viGEm.CreateXbox360Controller();
+                ctrl.FeedbackReceived += OnXbox360Feedback;
                 ctrl.Connect();
                 ctrl.SetAxisValue(Xbox360Axis.LeftThumbX, 0);
                 ctrl.SetAxisValue(Xbox360Axis.LeftThumbY, 0);
@@ -197,19 +217,32 @@ public class GamepadSession : IDisposable
 
     private void OnDs4Feedback(object? sender, DualShock4FeedbackReceivedEventArgs e)
     {
-        _ = SendAsync(new ServerToClient
-        {
-            Vibration = new Vibration
-            {
-                LargeMotor = e.LargeMotor,
-                SmallMotor = e.SmallMotor
-            }
-        });
+        _lastLargeMotor = e.LargeMotor;
+        _lastSmallMotor = e.SmallMotor;
+        _ = SendVibrationAsync(e.LargeMotor, e.SmallMotor);
+    }
+
+    private void OnXbox360Feedback(object? sender, Xbox360FeedbackReceivedEventArgs e)
+    {
+        _lastLargeMotor = e.LargeMotor;
+        _lastSmallMotor = e.SmallMotor;
+        _ = SendVibrationAsync(e.LargeMotor, e.SmallMotor);
     }
 
     private void HandleGamepadInput(GamepadInput input)
     {
         if (Controller == null) return;
+
+        _lastSeq = input.Seq;
+        var now = DateTime.UtcNow;
+        if ((now - _lastInputTime).TotalSeconds < 1)
+            _inputCountThisSecond++;
+        else
+        {
+            _measuredInputRate = _inputCountThisSecond;
+            _inputCountThisSecond = 1;
+        }
+        _lastInputTime = now;
 
         switch (Mode)
         {
@@ -388,6 +421,50 @@ public class GamepadSession : IDisposable
     private static byte MapAxisToByte(int value)
     {
         return (byte)Math.Clamp((value + 32768) / 256, 0, 255);
+    }
+
+    private async Task SendVibrationAsync(byte large, byte small)
+    {
+        await SendAsync(new ServerToClient
+        {
+            Vibration = new Vibration
+            {
+                LargeMotor = large,
+                SmallMotor = small
+            }
+        });
+    }
+
+    private async Task VibrationSendLoop(CancellationToken ct)
+    {
+        var intervalMs = 30;
+        while (!ct.IsCancellationRequested)
+        {
+            await Task.Delay(intervalMs, ct);
+
+            if (_lastSeq > 0)
+            {
+                await SendVibrationAsync(_lastLargeMotor, _lastSmallMotor);
+                await SendAsync(new ServerToClient
+                {
+                    RttReport = new RttReport
+                    {
+                        AckSeq = _lastSeq,
+                        MeasuredUplinkRateHz = (uint)_measuredInputRate,
+                        RecommendedUplinkIntervalUs = (uint)(intervalMs * 1000),
+                    }
+                });
+            }
+            else
+            {
+                await SendVibrationAsync(_lastLargeMotor, _lastSmallMotor);
+            }
+
+            if (_measuredInputRate > 0)
+                intervalMs = Math.Clamp(1000 / _measuredInputRate, 8, 50);
+            else
+                intervalMs = 30;
+        }
     }
 
     public async Task SetControllerModeAsync(ControllerMode mode)
