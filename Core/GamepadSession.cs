@@ -53,7 +53,15 @@ public class GamepadSession : IDisposable
     public void Start()
     {
         _readTask = Task.Run(() => ReadLoop(_cts.Token));
-        _vibTask = Task.Run(() => VibrationSendLoop(_cts.Token));
+        _vibTask = Task.Run(async () =>
+        {
+            try
+            {
+                await VibrationSendLoop(_cts.Token);
+            }
+            catch (OperationCanceledException) { }
+            catch { }
+        });
     }
 
     public async Task SendAsync(IMessage message)
@@ -76,8 +84,8 @@ public class GamepadSession : IDisposable
         }
         catch
         {
-            if (IsReconnectRequested) return;
-            Disconnect();
+            if (IsReconnectRequested || _disposed) return;
+            RequestReconnect();
         }
     }
 
@@ -92,14 +100,26 @@ public class GamepadSession : IDisposable
             while (!ct.IsCancellationRequested)
             {
                 var headerRead = await ReadExactAsync(_stream, lengthBuf, 4, ct);
-                if (headerRead < 4) { connectionAbnormal = true; break; }
+                if (headerRead < 4)
+                {
+                    connectionAbnormal = true;
+                    break;
+                }
 
                 var msgLen = (lengthBuf[0] << 24) | (lengthBuf[1] << 16) |
                              (lengthBuf[2] << 8) | lengthBuf[3];
-                if (msgLen < 0 || msgLen > buffer.Length) { connectionAbnormal = true; break; }
+                if (msgLen < 0 || msgLen > buffer.Length)
+                {
+                    connectionAbnormal = true;
+                    break;
+                }
 
                 var bodyRead = await ReadExactAsync(_stream, buffer, msgLen, ct);
-                if (bodyRead < msgLen) { connectionAbnormal = true; break; }
+                if (bodyRead < msgLen)
+                {
+                    connectionAbnormal = true;
+                    break;
+                }
 
                 ProcessMessage(buffer.AsSpan(0, msgLen));
             }
@@ -123,7 +143,13 @@ public class GamepadSession : IDisposable
             {
                 return;
             }
-            RequestReconnect();
+            IsReconnectRequested = true;
+            _disposed = true;
+            _cts.Cancel();
+            DestroyController();
+            try { _stream.Close(); } catch { }
+            try { _tcp.Close(); } catch { }
+            OnConnectionLost?.Invoke(this);
         }
     }
 
@@ -227,16 +253,15 @@ public class GamepadSession : IDisposable
 
     private void OnDs4Feedback(object? sender, DualShock4FeedbackReceivedEventArgs e)
     {
+        // Don't echo vibration feedback back to device — server controls it locally
         _lastLargeMotor = e.LargeMotor;
         _lastSmallMotor = e.SmallMotor;
-        _ = SendVibrationAsync(e.LargeMotor, e.SmallMotor);
     }
 
     private void OnXbox360Feedback(object? sender, Xbox360FeedbackReceivedEventArgs e)
     {
         _lastLargeMotor = e.LargeMotor;
         _lastSmallMotor = e.SmallMotor;
-        _ = SendVibrationAsync(e.LargeMotor, e.SmallMotor);
     }
 
     private void HandleGamepadInput(GamepadInput input)
@@ -444,35 +469,39 @@ public class GamepadSession : IDisposable
 
     private async Task VibrationSendLoop(CancellationToken ct)
     {
-        var intervalMs = 30;
         while (!ct.IsCancellationRequested)
         {
-            await Task.Delay(intervalMs, ct);
+            await Task.Delay(8, ct);
 
-            if (!IsReady) continue;
+            if (_disposed) continue;
 
             if (_lastSeq > 0)
             {
-                await SendVibrationAsync(_lastLargeMotor, _lastSmallMotor);
-                await SendAsync(new ServerToClient
+                try
                 {
-                    RttReport = new RttReport
+                    if (_disposed) break;
+                    await SendVibrationAsync(_lastLargeMotor, _lastSmallMotor);
+                    await SendAsync(new ServerToClient
                     {
-                        AckSeq = _lastSeq,
-                        MeasuredUplinkRateHz = (uint)_measuredInputRate,
-                        RecommendedUplinkIntervalUs = (uint)(intervalMs * 1000),
-                    }
-                });
+                        RttReport = new RttReport
+                        {
+                            AckSeq = _lastSeq,
+                            MeasuredUplinkRateHz = (uint)_measuredInputRate,
+                            RecommendedUplinkIntervalUs = 8000,
+                        }
+                    });
+                }
+                catch { /* silently ignore — connection likely dropped */ }
             }
             else if (_lastLargeMotor > 0 || _lastSmallMotor > 0)
             {
-                await SendVibrationAsync(_lastLargeMotor, _lastSmallMotor);
+                try
+                {
+                    if (_disposed) break;
+                    await SendVibrationAsync(_lastLargeMotor, _lastSmallMotor);
+                }
+                catch { /* silently ignore */ }
             }
-
-            if (_measuredInputRate > 0)
-                intervalMs = Math.Clamp(1000 / _measuredInputRate, 8, 50);
-            else
-                intervalMs = 30;
         }
     }
 
@@ -482,7 +511,7 @@ public class GamepadSession : IDisposable
 
         Mode = mode;
         DestroyController();
-        await Task.Delay(100);
+        await Task.Delay(100, _cts.Token);
         CreateController(mode);
         try
         {
@@ -494,6 +523,13 @@ public class GamepadSession : IDisposable
         catch { }
     }
 
+    public ValueTask WaitTasksAsync()
+    {
+        var tasks = new[] { _readTask, _vibTask }.Where(t => t != Task.CompletedTask).ToArray();
+        if (tasks.Length == 0) return default;
+        return new ValueTask(Task.WhenAll(tasks));
+    }
+
     public void Disconnect()
     {
         if (_disposed) return;
@@ -501,12 +537,12 @@ public class GamepadSession : IDisposable
         IsReconnectRequested = false;
         _cts.Cancel();
         DestroyController();
-        _stream.Close();
-        _tcp.Close();
+        try { _stream.Close(); } catch { }
+        try { _tcp.Close(); } catch { }
         OnDisconnected?.Invoke(this);
     }
 
-    public void RequestReconnect()
+    public async Task RequestReconnectAsync()
     {
         IsReconnectRequested = true;
         _disposed = true;
@@ -514,7 +550,17 @@ public class GamepadSession : IDisposable
         DestroyController();
         try { _stream.Close(); } catch { }
         try { _tcp.Close(); } catch { }
+
+        // Wait for background tasks to finish to prevent IOException/SocketException storms
+        await _readTask;
+        await _vibTask;
+
         OnConnectionLost?.Invoke(this);
+    }
+
+    public void RequestReconnect()
+    {
+        _ = RequestReconnectAsync();
     }
 
     public void RequestCancelReconnect()

@@ -14,6 +14,7 @@ public class NetworkService : IDisposable
     private readonly ConcurrentDictionary<string, DiscoveredDevice> _discovered = new();
     private readonly ConcurrentDictionary<string, GamepadSession> _sessions = new();
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _reconnectCts = new();
+    private readonly ConcurrentDictionary<string, object> _reconnectLocks = new();
     private readonly ViGEmClient _viGEm = new();
     private CancellationTokenSource? _discoveryCts;
     private Task? _discoveryTask;
@@ -54,51 +55,76 @@ public class NetworkService : IDisposable
 
     private async Task DiscoveryLoop(CancellationToken ct)
     {
+        var udp = new UdpClient(new IPEndPoint(IPAddress.Any, DefaultPort));
+        udp.EnableBroadcast = true;
+
         while (!ct.IsCancellationRequested)
         {
             try
             {
-                using var udp = new UdpClient(DefaultPort);
-                udp.EnableBroadcast = true;
+                var result = await udp.ReceiveAsync(ct);
+                var msg = System.Text.Encoding.UTF8.GetString(result.Buffer);
 
-                while (!ct.IsCancellationRequested)
+                if (msg.StartsWith(BroadcastPrefix))
                 {
-                    var result = await udp.ReceiveAsync(ct);
-                    var msg = System.Text.Encoding.UTF8.GetString(result.Buffer);
+                    var deviceName = msg[BroadcastPrefix.Length..];
+                    var key = $"{result.RemoteEndPoint.Address}:{DefaultPort}";
 
-                    if (msg.StartsWith(BroadcastPrefix))
+                    var device = _discovered.GetOrAdd(key, _ => new DiscoveredDevice
                     {
-                        var deviceName = msg[BroadcastPrefix.Length..];
-                        var key = $"{result.RemoteEndPoint.Address}:{DefaultPort}";
+                        DeviceName = deviceName,
+                        IpAddress = result.RemoteEndPoint.Address,
+                        Port = DefaultPort
+                    });
+                    device.LastSeen = DateTime.UtcNow;
 
-                        var device = _discovered.GetOrAdd(key, _ => new DiscoveredDevice
-                        {
-                            DeviceName = deviceName,
-                            IpAddress = result.RemoteEndPoint.Address,
-                            Port = DefaultPort
-                        });
-                        device.LastSeen = DateTime.UtcNow;
-
-                        OnDeviceDiscovered?.Invoke(device);
-                    }
+                    OnDeviceDiscovered?.Invoke(device);
                 }
             }
             catch (OperationCanceledException) { break; }
+            catch (System.Net.Sockets.SocketException ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[UDP] SocketException: {ex.Message}");
+                await Task.Delay(1000, ct);
+            }
             catch
             {
+                System.Diagnostics.Debug.WriteLine($"[UDP] Unknown exception, retrying");
                 await Task.Delay(1000, ct);
             }
         }
+
+        udp.Close();
     }
 
-    public async Task<GamepadSession?> ConnectAsync(DiscoveredDevice device)
+    public async Task<GamepadSession?> ConnectAsync(DiscoveredDevice device, int connectTimeoutMs = 5000)
     {
         try
         {
             var tcp = new TcpClient();
             tcp.NoDelay = true;
             tcp.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
-            await tcp.ConnectAsync(device.IpAddress, device.Port);
+            tcp.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.DontLinger, 1);
+            var connectCts = CancellationTokenSource.CreateLinkedTokenSource(_discoveryCts?.Token ?? CancellationToken.None);
+            connectCts.CancelAfter(connectTimeoutMs);
+            try
+            {
+                await tcp.ConnectAsync(device.IpAddress, device.Port, connectCts.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                tcp.Close();
+                return null;
+            }
+            catch (SocketException) when (connectCts.IsCancellationRequested)
+            {
+                tcp.Close();
+                return null;
+            }
+            finally
+            {
+                connectCts.Dispose();
+            }
 
             var session = new GamepadSession(device, tcp, _viGEm);
             session.OnReady += s =>
@@ -120,8 +146,8 @@ public class NetworkService : IDisposable
             {
                 _sessions.TryRemove(s.Device.Key, out _);
                 OnSessionEnded?.Invoke(s);
-                if (s.HasBeenReady)
-                    Task.Run(() => ReconnectAsync(s.Device, s.Device.Key));
+                if (s.HasBeenReady && !_disposed)
+                    _ = Task.Run(() => ReconnectAsync(s.Device, s.Device.Key));
             };
 
             session.Start();
@@ -146,24 +172,70 @@ public class NetworkService : IDisposable
 
     private async Task ReconnectAsync(DiscoveredDevice device, string key)
     {
-        var cts = new CancellationTokenSource();
-        _reconnectCts[key] = cts;
+        var lockObj = _reconnectLocks.GetOrAdd(key, _ => new object());
+        lock (lockObj)
+        {
+            // If there's already a reconnect loop running for this device, don't start another
+            if (_reconnectCts.TryGetValue(key, out var existingCts) && !existingCts.IsCancellationRequested)
+            {
+                // Another reconnect is already in progress, skip
+                return;
+            }
+            // Cancel any stale reconnect token
+            if (existingCts != null)
+            {
+                existingCts.Cancel();
+                existingCts.Dispose();
+            }
+            _reconnectCts[key] = new CancellationTokenSource();
+        }
+        var cts = _reconnectCts[key];
 
         // Notify UI that connection is lost and reconnecting
         UiInvoke(() => OnSessionConnectionLost?.Invoke(device.IpString));
+
+        var reconnectTimeout = TimeSpan.FromSeconds(10);
+        int attempt = 0;
 
         while (!cts.Token.IsCancellationRequested && !_disposed)
         {
             try
             {
-                await Task.Delay(3000, cts.Token);
+                int delay = Math.Min(2000 * (1 << attempt), 10000);
+                await Task.Delay(delay, cts.Token);
+                attempt++;
 
                 if (cts.IsCancellationRequested || _disposed) break;
 
                 var tcp = new TcpClient();
+                tcp.ReceiveTimeout = (int)reconnectTimeout.TotalMilliseconds;
+                tcp.SendTimeout = (int)reconnectTimeout.TotalMilliseconds;
                 tcp.NoDelay = true;
                 tcp.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
-                await tcp.ConnectAsync(device.IpAddress, device.Port);
+                tcp.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.DontLinger, 1);
+
+                var localCts = CancellationTokenSource.CreateLinkedTokenSource(cts.Token);
+                localCts.CancelAfter(5000);
+                try
+                {
+                    await tcp.ConnectAsync(device.IpAddress, device.Port, localCts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    tcp.Close();
+                    if (cts.IsCancellationRequested || _disposed) return;
+                    continue;
+                }
+                catch (SocketException) when (localCts.IsCancellationRequested)
+                {
+                    tcp.Close();
+                    if (cts.IsCancellationRequested || _disposed) return;
+                    continue;
+                }
+                finally
+                {
+                    localCts.Dispose();
+                }
 
                 if (cts.IsCancellationRequested || _disposed)
                 {
@@ -197,8 +269,8 @@ public class NetworkService : IDisposable
                 {
                     _sessions.TryRemove(s.Device.Key, out _);
                     OnSessionEnded?.Invoke(s);
-                    if (s.HasBeenReady)
-                        Task.Run(() => ReconnectAsync(device, s.Device.Key));
+                    if (s.HasBeenReady && !_disposed)
+                        _ = Task.Run(() => ReconnectAsync(device, s.Device.Key));
                 };
 
                 newSession.Start();
