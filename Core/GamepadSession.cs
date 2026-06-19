@@ -1,4 +1,4 @@
-﻿using System.Net.Sockets;
+using System.Net.Sockets;
 using GamepadEmu.Protocol;
 using Google.Protobuf;
 using Nefarius.ViGEm.Client;
@@ -25,6 +25,7 @@ public class GamepadSession : IDisposable
     private DateTime _lastInputTime = DateTime.MinValue;
     private int _inputCountThisSecond;
     private int _measuredInputRate;
+
 
     public DiscoveredDevice Device { get; }
     public ControllerMode Mode { get; private set; }
@@ -264,6 +265,7 @@ public class GamepadSession : IDisposable
                 break;
         }
     }
+
     private void HandleXbox360Input(GamepadInput input)
     {
         var ctrl = (IXbox360Controller)Controller!;
@@ -358,12 +360,9 @@ public class GamepadSession : IDisposable
         buf[11] = (byte)Math.Clamp(input.BatteryLevel / 10u, 0u, 10u);
 
         // [12-17]: Gyroscope (rad/s → int16, scale ≈940 for ±2000°/s)
-        var gx = input.GyroX;
-        var gy = input.GyroY;
-        var gz = input.GyroZ;
-        WriteInt16LE(buf, 12, (short)Math.Clamp(gx * 940f, short.MinValue, short.MaxValue));
-        WriteInt16LE(buf, 14, (short)Math.Clamp(gy * 940f, short.MinValue, short.MaxValue));
-        WriteInt16LE(buf, 16, (short)Math.Clamp(gz * 940f, short.MinValue, short.MaxValue));
+        WriteInt16LE(buf, 12, (short)Math.Clamp(input.GyroX * 940f, short.MinValue, short.MaxValue));
+        WriteInt16LE(buf, 14, (short)Math.Clamp(input.GyroY * 940f, short.MinValue, short.MaxValue));
+        WriteInt16LE(buf, 16, (short)Math.Clamp(input.GyroZ * 940f, short.MinValue, short.MaxValue));
 
         // [18-23]: Accelerometer (m/s² → int16, scale ≈835 for ±2g)
         WriteInt16LE(buf, 18, (short)Math.Clamp(input.AccelX * 835f, short.MinValue, short.MaxValue));
@@ -417,7 +416,9 @@ public class GamepadSession : IDisposable
 
     private static void WriteTouchData(byte[] buf, int offset, int x, int y, bool active, byte tracking)
     {
+        // Status: bit7 = 1 if inactive, bits 6-0 = tracking number
         buf[offset] = active ? (byte)(tracking & 0x7F) : (byte)(0x80 | (tracking & 0x7F));
+        // 3 bytes: 12-bit X + 12-bit Y packed
         int cx = Math.Clamp(x, 0, 1919);
         int cy = Math.Clamp(y, 0, 942);
         buf[offset + 1] = (byte)(cx & 0xFF);
@@ -542,8 +543,8 @@ public class GamepadSession : IDisposable
 
     public void RequestReconnect()
     {
-        _disposed = true;
         IsReconnectRequested = true;
+        _disposed = true;
         _cts.Cancel();
         DestroyController();
         try { _stream.Close(); } catch { }
