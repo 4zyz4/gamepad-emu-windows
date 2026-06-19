@@ -10,6 +10,7 @@ public class DeviceCardViewModel : INotifyPropertyChanged
     private readonly DiscoveredDevice _device;
     private bool _isConnected;
     private bool _isReconnecting;
+    private bool _isConnecting;
     private ControllerMode _mode = ControllerMode.Ds4;
 
     public string IpAddress => _device.IpString;
@@ -45,11 +46,26 @@ public class DeviceCardViewModel : INotifyPropertyChanged
         }
     }
 
-    public bool ShowConnect => !IsConnected && !IsReconnecting;
+    public bool IsConnecting
+    {
+        get => _isConnecting;
+        set
+        {
+            if (_isConnecting == value) return;
+            _isConnecting = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(ShowConnect));
+            OnPropertyChanged(nameof(ShowControls));
+            OnPropertyChanged(nameof(ShowReconnecting));
+            OnPropertyChanged(nameof(StatusText));
+        }
+    }
+
+    public bool ShowConnect => !IsConnected && !IsReconnecting && !IsConnecting;
     public bool ShowControls => IsConnected;
     public bool ShowReconnecting => IsReconnecting;
 
-    public string StatusText => IsReconnecting ? "无响应" : "";
+    public string StatusText => IsReconnecting || IsConnecting ? "尝试连接" : "";
 
     public ControllerMode Mode
     {

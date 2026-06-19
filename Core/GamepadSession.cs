@@ -16,7 +16,6 @@ public class GamepadSession : IDisposable
     private readonly CancellationTokenSource _cts = new();
     private Task _readTask = Task.CompletedTask;
     private Task _vibTask = Task.CompletedTask;
-    private Task _keepaliveTask = Task.CompletedTask;
     private bool _disposed;
     private bool _readyFired;
     private byte _lastLargeMotor;
@@ -32,6 +31,7 @@ public class GamepadSession : IDisposable
     public object? Controller { get; private set; }
     public bool IsConnected => _tcp.Connected && !_disposed;
     public bool IsReady => Controller != null;
+    public bool HasBeenReady => _readyFired;
 
     public event Action<GamepadSession>? OnReady;
     public event Action<GamepadSession>? OnDisconnected;
@@ -54,7 +54,6 @@ public class GamepadSession : IDisposable
     {
         _readTask = Task.Run(() => ReadLoop(_cts.Token));
         _vibTask = Task.Run(() => VibrationSendLoop(_cts.Token));
-        _keepaliveTask = Task.Run(() => KeepaliveLoop(_cts.Token));
     }
 
     public async Task SendAsync(IMessage message)
@@ -450,6 +449,8 @@ public class GamepadSession : IDisposable
         {
             await Task.Delay(intervalMs, ct);
 
+            if (!IsReady) continue;
+
             if (_lastSeq > 0)
             {
                 await SendVibrationAsync(_lastLargeMotor, _lastSmallMotor);
@@ -463,7 +464,7 @@ public class GamepadSession : IDisposable
                     }
                 });
             }
-            else
+            else if (_lastLargeMotor > 0 || _lastSmallMotor > 0)
             {
                 await SendVibrationAsync(_lastLargeMotor, _lastSmallMotor);
             }
@@ -473,42 +474,6 @@ public class GamepadSession : IDisposable
             else
                 intervalMs = 30;
         }
-    }
-
-    private async Task KeepaliveLoop(CancellationToken ct)
-    {
-        while (!ct.IsCancellationRequested)
-        {
-            await Task.Delay(10000, ct);
-            try
-            {
-                await SendKeepaliveAsync();
-            }
-            catch { }
-        }
-    }
-
-    private async Task SendKeepaliveAsync()
-    {
-        if (_disposed) return;
-        try
-        {
-            var data = ClientToServer.Parser.ParseFrom(Array.Empty<byte>());
-            var wrapper = new ClientToServer { KeepAlive = new KeepAlive { Timestamp = (ulong)DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() } };
-            var buf = wrapper.ToByteArray();
-            var len = buf.Length;
-            var header = new byte[4]
-            {
-                (byte)((len >> 24) & 0xFF),
-                (byte)((len >> 16) & 0xFF),
-                (byte)((len >> 8) & 0xFF),
-                (byte)(len & 0xFF),
-            };
-            await _stream.WriteAsync(header, _cts.Token);
-            await _stream.WriteAsync(buf, _cts.Token);
-            await _stream.FlushAsync(_cts.Token);
-        }
-        catch { }
     }
 
     public async Task SetControllerModeAsync(ControllerMode mode)

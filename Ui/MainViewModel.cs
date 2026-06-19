@@ -15,6 +15,7 @@ public class MainViewModel : INotifyPropertyChanged
     private bool _driverOk;
     private string _manualIp = "";
     private readonly Dictionary<string, GamepadSession> _sessionMap = new();
+    private readonly HashSet<string> _initialConnecting = new();
 
     public ObservableCollection<DeviceCardViewModel> DeviceCards { get; } = new();
     public ObservableCollection<GamepadSession> Sessions { get; } = new();
@@ -68,28 +69,37 @@ public class MainViewModel : INotifyPropertyChanged
     {
         if (_network == null) return;
         var device = card.Device;
-        StatusText = $"正在连接到 {device.IpString}...";
+        var ip = device.IpString;
+        _initialConnecting.Add(ip);
+        card.IsConnecting = true;
+        StatusText = $"正在连接到 {ip}...";
         var session = await _network.ConnectAsync(device);
         if (session != null)
         {
-            _sessionMap[device.IpString] = session;
-            card.IsConnected = true;
-            StatusText = $"已连接: {device.IpString}";
+            _sessionMap[ip] = session;
+            StatusText = $"已连接: {ip}";
         }
         else
         {
-            StatusText = $"连接失败: {device.IpString}";
+            _initialConnecting.Remove(ip);
+            card.IsConnecting = false;
+            StatusText = $"连接失败: {ip}";
         }
     }
 
     public Task DisconnectAsync(DeviceCardViewModel card)
     {
         var ip = card.IpAddress;
+        _initialConnecting.Remove(ip);
         _network?.CancelReconnect(ip);
         if (_sessionMap.TryGetValue(ip, out var session))
         {
             session.Disconnect();
+            _sessionMap.Remove(ip);
         }
+        card.IsConnected = false;
+        card.IsConnecting = false;
+        card.IsReconnecting = false;
         return Task.CompletedTask;
     }
 
@@ -112,6 +122,7 @@ public class MainViewModel : INotifyPropertyChanged
         DeviceCards.Clear();
         Sessions.Clear();
         _sessionMap.Clear();
+        _initialConnecting.Clear();
 
         foreach (var session in _network.ActiveSessions)
         {
@@ -171,16 +182,19 @@ public class MainViewModel : INotifyPropertyChanged
             DeviceCards.Add(card);
         }
 
+        _initialConnecting.Add(ip);
+        card.IsConnecting = true;
         StatusText = $"正在连接到 {ip}...";
         var session = await _network.ConnectAsync(device);
         if (session != null)
         {
             _sessionMap[ip] = session;
-            card.IsConnected = true;
             StatusText = $"已连接: {ip}";
         }
         else
         {
+            _initialConnecting.Remove(ip);
+            card.IsConnecting = false;
             StatusText = $"连接失败: {ip}";
         }
     }
@@ -202,14 +216,16 @@ public class MainViewModel : INotifyPropertyChanged
     {
         UiInvoke(() =>
         {
-            Sessions.Add(session);
-            _sessionMap[session.Device.IpString] = session;
-            OnPropertyChanged(nameof(HasActiveSession));
             var ip = session.Device.IpString;
+            _initialConnecting.Remove(ip);
+            Sessions.Add(session);
+            _sessionMap[ip] = session;
+            OnPropertyChanged(nameof(HasActiveSession));
             var card = DeviceCards.FirstOrDefault(c => c.IpAddress == ip);
             if (card != null)
             {
                 card.IsConnected = true;
+                card.IsConnecting = false;
                 card.IsReconnecting = false;
                 card.Mode = session.Mode;
             }
@@ -223,11 +239,13 @@ public class MainViewModel : INotifyPropertyChanged
             Sessions.Remove(session);
             OnPropertyChanged(nameof(HasActiveSession));
             var ip = session.Device.IpString;
+            _initialConnecting.Remove(ip);
             _sessionMap.Remove(ip);
             var card = DeviceCards.FirstOrDefault(c => c.IpAddress == ip);
             if (card != null)
             {
                 card.IsConnected = false;
+                card.IsConnecting = false;
                 card.IsReconnecting = false;
                 card.Mode = ControllerMode.Ds4;
             }
@@ -242,8 +260,15 @@ public class MainViewModel : INotifyPropertyChanged
             var card = DeviceCards.FirstOrDefault(c => c.IpAddress == ip);
             if (card != null)
             {
-                card.IsConnected = false;
-                card.IsReconnecting = true;
+                if (_initialConnecting.Remove(ip))
+                {
+                    card.IsConnecting = false;
+                }
+                else
+                {
+                    card.IsConnected = false;
+                    card.IsReconnecting = true;
+                }
             }
         });
     }
@@ -264,6 +289,7 @@ public class MainViewModel : INotifyPropertyChanged
         _network.OnSessionEnded -= OnSessionEnded;
         _network.StopDiscovery();
         _network.DisconnectAll();
+        _initialConnecting.Clear();
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;

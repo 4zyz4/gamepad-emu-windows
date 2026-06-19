@@ -74,7 +74,7 @@
                                 <!-- Device info -->
                                 <StackPanel Grid.Column="0" VerticalAlignment="Center">
                                     <TextBlock Text="{Binding IpAddress}" FontSize="14" FontWeight="SemiBold" />
-                                    <TextBlock Text="{Binding StatusText}" FontSize="11" Foreground="#DC3545" Margin="0,2,0,0" />
+                                    <TextBlock Text="{Binding StatusText}" FontSize="11" Foreground="#6C757D" Margin="0,2,0,0" />
                                 </StackPanel>
 
                                 <!-- Connect button -->

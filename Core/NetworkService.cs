@@ -118,7 +118,10 @@ public class NetworkService : IDisposable
             };
             session.OnConnectionLost += s =>
             {
-                Task.Run(() => ReconnectAsync(s.Device, s.Device.Key));
+                _sessions.TryRemove(s.Device.Key, out _);
+                OnSessionEnded?.Invoke(s);
+                if (s.HasBeenReady)
+                    Task.Run(() => ReconnectAsync(s.Device, s.Device.Key));
             };
 
             session.Start();
@@ -192,7 +195,10 @@ public class NetworkService : IDisposable
                 };
                 newSession.OnConnectionLost += s =>
                 {
-                    Task.Run(() => ReconnectAsync(device, s.Device.Key));
+                    _sessions.TryRemove(s.Device.Key, out _);
+                    OnSessionEnded?.Invoke(s);
+                    if (s.HasBeenReady)
+                        Task.Run(() => ReconnectAsync(device, s.Device.Key));
                 };
 
                 newSession.Start();
